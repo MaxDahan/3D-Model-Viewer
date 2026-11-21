@@ -1,0 +1,249 @@
+<div class="model-timelapse">
+  <style>
+    .model-timelapse {
+      --viewer-text: rgba(255,255,255,.92);
+      position: relative; width: 100%; max-width: 1200px; margin: auto;
+      background: #080808; color: var(--viewer-text); font: 14px/1.4 system-ui, sans-serif;
+      border: 1px solid #333; border-radius: 18px; overflow: hidden;
+    }
+    .model-timelapse * { box-sizing: border-box; }
+    .model-timelapse .mt-view {
+      position: relative; width: 100%; height: min(70vh, 750px); min-height: 300px;
+      cursor: grab; touch-action: none; user-select: none; background: #080808; overflow: hidden;
+    }
+    .model-timelapse .mt-view:active { cursor: grabbing; }
+    .model-timelapse .mt-image {
+      width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none;
+    }
+    .model-timelapse .mt-tip {
+      position: absolute; top: 12px; left: 12px; padding: 6px 10px;
+      border-radius: 8px; background: rgba(0,0,0,.7); pointer-events: none; z-index: 1;
+    }
+    .model-timelapse .mt-status { min-height: 1.4em; padding: 0 16px; color: #ddd; }
+    .model-timelapse .mt-controls {
+      display: flex; gap: 12px; align-items: center; padding: 12px 16px 16px;
+    }
+    .model-timelapse button {
+      color: var(--viewer-text); background: #252525; border: 1px solid #555;
+      border-radius: 8px; padding: 8px 10px; cursor: pointer; font: inherit;
+    }
+    .model-timelapse button:focus-visible, .model-timelapse input:focus-visible,
+    .model-timelapse .mt-view:focus-visible { outline: 2px solid white; outline-offset: -2px; }
+    .model-timelapse .mt-timeline { flex: 1; min-width: 50px; accent-color: white; }
+    .model-timelapse .mt-count { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .model-timelapse:fullscreen { max-width: none; height: 100%; display: flex; flex-direction: column; }
+    .model-timelapse:fullscreen .mt-view { flex: 1; height: auto; min-height: 0; }
+    @media (max-width: 500px) {
+      .model-timelapse .mt-controls { gap: 6px; padding: 10px; }
+      .model-timelapse button { padding: 7px; }
+      .model-timelapse .mt-view { height: 55vh; }
+    }
+  </style>
+  <div class="mt-view" tabindex="0" role="group" aria-label="Model view. Drag or use arrow keys to rotate. Use plus and minus to zoom.">
+    <img class="mt-image" alt="3D model timelapse" draggable="false">
+    <div class="mt-tip">Drag to rotate · Scroll to zoom</div>
+  </div>
+  <div class="mt-status" role="status" aria-live="polite"></div>
+  <div class="mt-controls">
+    <button class="mt-play" type="button">Pause</button>
+    <input class="mt-timeline" type="range" min="0" value="0" aria-label="Model stage">
+    <span class="mt-count"></span>
+    <button class="mt-reset" type="button">Reset view</button>
+    <button class="mt-fullscreen" type="button">Fullscreen</button>
+  </div>
+</div>
+<script>
+(() => {
+  const root = document.currentScript.previousElementSibling;
+  const frames = __TIMELAPSE_DATA__;
+  const view = root.querySelector('.mt-view');
+  const image = root.querySelector('.mt-image');
+  const play = root.querySelector('.mt-play');
+  const timeline = root.querySelector('.mt-timeline');
+  const count = root.querySelector('.mt-count');
+  const status = root.querySelector('.mt-status');
+  const fullscreen = root.querySelector('.mt-fullscreen');
+  const stepsPerSecond = 2;
+  const cache = new Map();
+  const cacheLimit = 18;
+  let stage = 0, yaw = 0, pitch = 0, requestId = 0, zoom = 1;
+  let playing = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let pending = true, lastAdvance = 0, pointer = null, prefetching = false;
+
+  const pitchCount = Array.isArray(frames) && Array.isArray(frames[0]) ? frames[0].length : 0;
+  const yawCount = pitchCount && Array.isArray(frames[0][0]) ? frames[0][0].length : 0;
+  if (!pitchCount || !yawCount ||
+      frames.some(step => !Array.isArray(step) || step.length !== pitchCount ||
+        step.some(row => !Array.isArray(row) || row.length !== yawCount ||
+          row.some(url => typeof url !== 'string' || !url)))) {
+    status.textContent = 'Invalid frame data. Regenerate the WordPress HTML.';
+    play.disabled = true;
+    timeline.disabled = true;
+    return;
+  }
+
+  timeline.max = frames.length - 1;
+  function updateControls() {
+    timeline.value = stage;
+    count.textContent = `${stage + 1} / ${frames.length}`;
+    play.textContent = playing ? 'Pause' : (stage === frames.length - 1 ? 'Replay' : 'Play');
+    play.setAttribute('aria-label', play.textContent + ' timelapse');
+  }
+
+  function setZoom(value) {
+    zoom = Math.max(1, Math.min(4, value));
+    image.style.transform = `scale(${zoom})`;
+  }
+
+  function load(url) {
+    if (cache.has(url)) {
+      const entry = cache.get(url);
+      cache.delete(url);
+      cache.set(url, entry);
+      return entry;
+    }
+    const entry = new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Could not load image: ' + url));
+      img.src = url;
+    });
+    cache.set(url, entry);
+    entry.catch(() => { if (cache.get(url) === entry) cache.delete(url); });
+    while (cache.size > cacheLimit) cache.delete(cache.keys().next().value);
+    return entry;
+  }
+
+  async function showFrame() {
+    const id = ++requestId;
+    const url = frames[stage][pitch][yaw];
+    pending = true;
+    status.textContent = 'Loading image…';
+    updateControls();
+    try {
+      const loaded = await load(url);
+      if (id !== requestId) return;
+      image.src = loaded.src;
+      image.alt = `Model stage ${stage + 1} of ${frames.length}`;
+      pending = false;
+      lastAdvance = performance.now();
+      status.textContent = '';
+      prefetchNext();
+    } catch (error) {
+      if (id !== requestId) return;
+      pending = false;
+      playing = false;
+      status.textContent = 'Image could not be loaded. Check the image URL and try again.';
+      console.error(error);
+      updateControls();
+    }
+  }
+
+  async function prefetchNext() {
+    if (prefetching || stage + 1 >= frames.length) return;
+    prefetching = true;
+    try {
+      await load(frames[stage + 1][pitch][yaw]);
+    } catch (error) {
+      console.warn('Could not prefetch the next stage:', error);
+    } finally {
+      prefetching = false;
+    }
+  }
+
+  function tick(now) {
+    if (playing && !pending && now - lastAdvance >= 1000 / stepsPerSecond) {
+      if (stage < frames.length - 1) {
+        stage++;
+        if (stage === frames.length - 1) playing = false;
+        showFrame();
+      } else {
+        playing = false;
+        updateControls();
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+
+  play.addEventListener('click', () => {
+    if (playing) {
+      playing = false;
+    } else {
+      if (stage === frames.length - 1) stage = 0;
+      playing = true;
+      showFrame();
+    }
+    updateControls();
+  });
+  timeline.addEventListener('input', () => {
+    playing = false;
+    stage = Number(timeline.value);
+    showFrame();
+  });
+  root.querySelector('.mt-reset').addEventListener('click', () => {
+    yaw = 0;
+    pitch = 0;
+    setZoom(1);
+    showFrame();
+  });
+  fullscreen.addEventListener('click', async () => {
+    try {
+      if (document.fullscreenElement === root) await document.exitFullscreen();
+      else if (root.requestFullscreen) await root.requestFullscreen();
+      else status.textContent = 'Fullscreen is not supported in this browser.';
+    } catch (error) {
+      status.textContent = 'Could not enter fullscreen.';
+      console.error(error);
+    }
+  });
+  view.addEventListener('wheel', event => {
+    if (event.ctrlKey || event.metaKey || !event.deltaY) return;
+    event.preventDefault();
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? view.clientHeight : 1;
+    setZoom(zoom * Math.exp(-event.deltaY * unit * 0.001));
+  }, { passive: false });
+  view.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || pointer) return;
+    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    view.setPointerCapture(event.pointerId);
+  });
+  view.addEventListener('pointermove', event => {
+    if (!pointer || pointer.id !== event.pointerId) return;
+    const dx = event.clientX - pointer.x, dy = event.clientY - pointer.y;
+    const xSteps = Math.trunc(dx / 30), ySteps = Math.trunc(dy / 30);
+    if (!xSteps && !ySteps) return;
+    pointer.x += xSteps * 30;
+    pointer.y += ySteps * 30;
+    yaw = ((yaw - xSteps) % yawCount + yawCount) % yawCount;
+    pitch = Math.max(0, Math.min(pitchCount - 1, pitch + ySteps));
+    showFrame();
+  });
+  function releasePointer(event) {
+    if (pointer && pointer.id === event.pointerId) pointer = null;
+  }
+  view.addEventListener('pointerup', releasePointer);
+  view.addEventListener('pointercancel', releasePointer);
+  view.addEventListener('lostpointercapture', releasePointer);
+  view.addEventListener('keydown', event => {
+    if (event.key === 'ArrowLeft') yaw = (yaw + yawCount - 1) % yawCount;
+    else if (event.key === 'ArrowRight') yaw = (yaw + 1) % yawCount;
+    else if (event.key === 'ArrowUp') pitch = Math.min(pitchCount - 1, pitch + 1);
+    else if (event.key === 'ArrowDown') pitch = Math.max(0, pitch - 1);
+    else if (event.key === '+' || event.key === '=') {
+      event.preventDefault();
+      setZoom(zoom * 1.2);
+      return;
+    } else if (event.key === '-') {
+      event.preventDefault();
+      setZoom(zoom / 1.2);
+      return;
+    }
+    else return;
+    event.preventDefault();
+    showFrame();
+  });
+  updateControls();
+  showFrame();
+  requestAnimationFrame(tick);
+})();
+</script>

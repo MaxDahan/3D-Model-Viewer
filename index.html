@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Model Viewer - Image Sequence</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg: #000000;
+      --text: rgba(255, 255, 255, 0.92);
+      --muted: rgba(255, 255, 255, 0.45);
+      --line: rgba(255, 255, 255, 0.14);
+    }
+
+    html, body {
+      height: 100%;
+      width: 100%;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      overflow: hidden;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Canvas Container */
+    .canvas-container {
+      position: relative;
+      width: 90vw;
+      height: 90vh;
+      max-width: 1200px;
+      max-height: 1200px;
+      background: radial-gradient(circle, rgba(255,255,255,0.05), transparent);
+      border-radius: 24px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+      cursor: grab;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .canvas-container:active {
+      cursor: grabbing;
+    }
+
+    #canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      image-rendering: crisp-edges;
+    }
+
+    /* Header */
+    .header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 50;
+      padding: 20px 30px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(14px) saturate(135%);
+      -webkit-backdrop-filter: blur(14px) saturate(135%);
+      background: linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.3));
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand {
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.04));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 10px 24px rgba(0,0,0,.16);
+      backdrop-filter: blur(14px) saturate(140%);
+      -webkit-backdrop-filter: blur(14px) saturate(140%);
+      font-size: 12px;
+      letter-spacing: .3em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,.82);
+      user-select: none;
+    }
+
+    .header-controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .btn {
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.18);
+      background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.04));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 10px 24px rgba(0,0,0,.16);
+      backdrop-filter: blur(14px) saturate(140%);
+      -webkit-backdrop-filter: blur(14px) saturate(140%);
+      color: rgba(255,255,255,.85);
+      cursor: pointer;
+      font-size: 12px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      transition: all .18s ease;
+      border: none;
+    }
+
+    .btn:hover {
+      background: linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.08));
+      border-color: rgba(255,255,255,.26);
+      transform: translateY(-1px) scale(1.01);
+    }
+
+    /* Controls Toast */
+    .controls-toast {
+      position: fixed;
+      bottom: 40px;
+      right: 24px;
+      width: 240px;
+      padding: 14px 16px;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.045));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 18px 40px rgba(0,0,0,.24);
+      backdrop-filter: blur(14px) saturate(135%);
+      -webkit-backdrop-filter: blur(14px) saturate(135%);
+      color: rgba(255,255,255,.88);
+      z-index: 60;
+    }
+
+    .toast-title {
+      font-size: 10px;
+      letter-spacing: .22em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,.84);
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .toast-body {
+      font-size: 12px;
+      line-height: 1.45;
+      color: rgba(255,255,255,.68);
+    }
+
+    .toast-hint {
+      margin-top: 8px;
+      font-size: 9px;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,.44);
+    }
+
+    /* Info Panel */
+    .info-panel {
+      position: fixed;
+      bottom: 40px;
+      left: 24px;
+      max-width: 280px;
+      padding: 18px 20px;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.045));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 18px 40px rgba(0,0,0,.24);
+      backdrop-filter: blur(14px) saturate(135%);
+      -webkit-backdrop-filter: blur(14px) saturate(135%);
+      color: rgba(255,255,255,.88);
+      z-index: 60;
+    }
+
+    .info-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: rgba(255,255,255,.95);
+      margin-bottom: 8px;
+    }
+
+    .info-desc {
+      font-size: 12px;
+      line-height: 1.5;
+      color: rgba(255,255,255,.65);
+    }
+
+    /* Loading State */
+    .loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      background: rgba(0,0,0,0.5);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    .loader-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      min-width: 220px;
+      padding: 20px 22px 18px;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: linear-gradient(180deg, rgba(18,18,18,.86), rgba(7,7,7,.72));
+      box-shadow: 0 24px 44px rgba(0,0,0,.34);
+      backdrop-filter: blur(14px) saturate(120%);
+      -webkit-backdrop-filter: blur(14px) saturate(120%);
+      color: rgba(255,255,255,.9);
+      text-align: center;
+    }
+
+    .loader-spinner {
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      border: 2px solid rgba(255,255,255,.16);
+      border-top-color: rgba(255,255,255,.92);
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loader-text {
+      font-size: 14px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .loader.hidden {
+      display: none;
+    }
+
+    /* Timeline */
+    .timeline-shell {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(860px, calc(100vw - 64px));
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      z-index: 60;
+    }
+
+    .timeline-playToggle {
+      position: relative;
+      width: 24px;
+      height: 24px;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      color: rgba(255,255,255,0.92);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      flex: 0 0 auto;
+      transition: opacity .18s ease, transform .18s ease, color .18s ease;
+    }
+
+    .timeline-playToggle:hover {
+      opacity: 1;
+    }
+
+    .timeline-playToggle:active {
+      transform: scale(0.96);
+    }
+
+    .timeline-playToggle svg {
+      width: 19px;
+      height: 19px;
+      display: block;
+    }
+
+    .timeline-playToggle .icon-play {
+      margin-left: 1px;
+    }
+
+    .timeline-playToggle .icon-pause {
+      display: none;
+    }
+
+    .timeline-playToggle[data-state="playing"] .icon-play {
+      display: none;
+    }
+
+    .timeline-playToggle[data-state="playing"] .icon-pause {
+      display: block;
+    }
+
+    .timeline-playToggle[data-state="paused"] {
+      color: rgba(255,255,255,0.72);
+      opacity: 0.86;
+    }
+
+    #timeline {
+      position: relative;
+      width: 100%;
+      height: 14px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04));
+      border: 1px solid rgba(255,255,255,0.16);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.20), inset 0 -8px 18px rgba(0,0,0,0.22), 0 10px 30px rgba(0,0,0,0.22);
+      backdrop-filter: blur(14px) saturate(135%);
+      -webkit-backdrop-filter: blur(14px) saturate(135%);
+      overflow: visible;
+      flex: 1 1 auto;
+      cursor: pointer;
+    }
+
+    #timeline::before {
+      content: "";
+      position: absolute;
+      inset: 1px;
+      border-radius: inherit;
+      background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.02));
+      opacity: 0.9;
+      pointer-events: none;
+    }
+
+    .timeline-progress {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      background: linear-gradient(90deg, rgba(255,255,255,0.4), rgba(255,255,255,0.2));
+      border-radius: 999px;
+      pointer-events: none;
+    }
+
+    .timeline-thumb {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.94), rgba(255,255,255,0.48) 62%, rgba(255,255,255,0.14) 100%);
+      border: 1px solid rgba(255,255,255,0.22);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.36), 0 6px 16px rgba(0,0,0,0.16);
+      transform: translate(-50%, -50%);
+      pointer-events: auto;
+      cursor: grab;
+    }
+
+    .timeline-thumb:active {
+      cursor: grabbing;
+    }
+
+    .timeline-time {
+      position: relative;
+      flex: 0 0 auto;
+      font-size: 12px;
+      letter-spacing: .08em;
+      color: rgba(255,255,255,0.56);
+      font-variant-numeric: tabular-nums;
+      min-width: 40px;
+      text-align: right;
+    }
+
+    .hud-fs {
+      position: relative;
+      right: auto;
+      bottom: auto;
+      width: 24px;
+      height: 24px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      color: rgba(255,255,255,0.88);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      flex: 0 0 auto;
+      overflow: visible;
+      cursor: pointer;
+      transition: opacity .18s ease, transform .18s ease;
+    }
+
+    .hud-fs::before {
+      display: none;
+    }
+
+    .hud-fs:hover {
+      transform: none;
+      border-color: transparent;
+      background: transparent;
+      box-shadow: none;
+      opacity: 1;
+    }
+
+    .hud-fs svg {
+      width: 18px;
+      height: 18px;
+    }
+      .header {
+        padding: 16px 20px;
+      }
+
+      .controls-toast {
+        bottom: 24px;
+        right: 16px;
+        width: 200px;
+        padding: 12px 14px;
+      }
+
+      .info-panel {
+        bottom: 24px;
+        left: 16px;
+        max-width: 240px;
+      }
+
+      .canvas-container {
+        width: 95vw;
+        height: 95vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="canvas-container">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div class="header">
+    <div class="brand">Tiger Viewer</div>
+    <div class="header-controls">
+      <button class="btn" onclick="resetView()">Reset</button>
+      <button class="btn" id="autoRotateBtn" onclick="toggleAutoRotate()">Auto</button>
+    </div>
+  </div>
+
+  <div class="info-panel">
+    <div class="info-title">About</div>
+    <div class="info-desc">
+      Drag to rotate • Double-click to reset
+    </div>
+  </div>
+
+  <div class="controls-toast">
+    <div class="toast-title">Controls</div>
+    <div class="toast-body">
+      <strong>Mouse:</strong> Drag to rotate<br>
+      <strong>Double Click:</strong> Reset view
+    </div>
+    <div class="toast-hint">Mobile: Swipe to rotate</div>
+  </div>
+
+  <div class="timeline-shell">
+    <button class="timeline-playToggle" id="playBtn" data-state="paused">
+      <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M8 5v14l11-7z"/>
+      </svg>
+      <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+      </svg>
+    </button>
+    <div id="timeline">
+      <div class="timeline-progress" id="timelineProgress"></div>
+      <div class="timeline-thumb" id="timelineThumb"></div>
+    </div>
+    <div class="timeline-time">
+      <span id="currentFrame">00</span> / <span id="totalFrames">36</span>
+    </div>
+    <button class="hud-fs" id="fullscreenBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="loader" id="loader">
+    <div class="loader-card">
+      <div class="loader-spinner"></div>
+      <div class="loader-text">Loading Frame Images...</div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const loader = document.getElementById('loader');
+    const autoRotateBtn = document.getElementById('autoRotateBtn');
+    const playBtn = document.getElementById('playBtn');
+    const timeline = document.getElementById('timeline');
+    const timelineThumb = document.getElementById('timelineThumb');
+    const timelineProgress = document.getElementById('timelineProgress');
+    const currentFrameSpan = document.getElementById('currentFrame');
+    const totalFramesSpan = document.getElementById('totalFrames');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+
+    // Configuration
+    const NUM_FRAMES = 36;
+    const FRAME_WIDTH = 1024;
+    const FRAME_HEIGHT = 1024;
+
+    let frames = [];
+    let currentFrame = 0;
+    let autoRotate = false;
+    let isPlaying = false;
+    let isDragging = false;
+    let isDraggingTimeline = false;
+    let lastX = 0;
+    let lastY = 0;
+    let dragOffset = 0;
+    let animationSpeed = 0.5; // frames per update
+
+    // Update total frames display
+    totalFramesSpan.textContent = String(NUM_FRAMES - 1).padStart(2, '0');
+
+    // Set canvas size
+    function resizeCanvas() {
+      const container = canvas.parentElement;
+      canvas.width = container.clientWidth;
+      canvas.height = container.clientHeight;
+      drawFrame();
+    }
+
+    function drawFrame() {
+      if (frames.length === 0) return;
+      
+      const img = frames[Math.floor(currentFrame) % frames.length];
+      const containerWidth = canvas.width;
+      const containerHeight = canvas.height;
+      
+      // Calculate scale to fit container while maintaining aspect ratio
+      const scale = Math.min(
+        containerWidth / img.width,
+        containerHeight / img.height
+      );
+      
+      const scaledWidth = img.width * scale;
+      const scaledHeight = img.height * scale;
+      const x = (containerWidth - scaledWidth) / 2;
+      const y = (containerHeight - scaledHeight) / 2;
+      
+      // Clear canvas
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, containerWidth, containerHeight);
+      
+      // Draw frame
+      ctx.drawImage(img, x, y, scaledWidth, scaledHeight);
+      
+      // Update UI
+      currentFrameSpan.textContent = String(Math.floor(currentFrame)).padStart(2, '0');
+      updateTimelineUI();
+    }
+
+    function updateTimelineUI() {
+      const percent = (currentFrame / (NUM_FRAMES - 1)) * 100;
+      timelineProgress.style.width = percent + '%';
+      timelineThumb.style.left = percent + '%';
+    }
+
+    function animate() {
+      if (isPlaying || autoRotate) {
+        currentFrame += animationSpeed;
+        if (currentFrame >= NUM_FRAMES) {
+          currentFrame = 0;
+        }
+        drawFrame();
+      }
+      requestAnimationFrame(animate);
+    }
+
+    function resetView() {
+      currentFrame = 0;
+      dragOffset = 0;
+      isPlaying = false;
+      playBtn.dataset.state = 'paused';
+      drawFrame();
+    }
+
+    function toggleAutoRotate() {
+      autoRotate = !autoRotate;
+      autoRotateBtn.style.opacity = autoRotate ? '1' : '0.6';
+    }
+
+    function togglePlay() {
+      isPlaying = !isPlaying;
+      playBtn.dataset.state = isPlaying ? 'playing' : 'paused';
+    }
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        canvas.parentElement.requestFullscreen().catch(err => console.log(err));
+      } else {
+        document.exitFullscreen();
+      }
+    }
+
+    // Timeline events
+    playBtn.addEventListener('click', togglePlay);
+    fullscreenBtn.addEventListener('click', toggleFullscreen);
+
+    timeline.addEventListener('mousedown', (e) => {
+      isDraggingTimeline = true;
+      const rect = timeline.getBoundingClientRect();
+      const percent = (e.clientX - rect.left) / rect.width;
+      currentFrame = percent * (NUM_FRAMES - 1);
+      currentFrame = Math.max(0, Math.min(NUM_FRAMES - 1, currentFrame));
+      drawFrame();
+    });
+
+    timelineThumb.addEventListener('mousedown', (e) => {
+      isDraggingTimeline = true;
+      e.stopPropagation();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDraggingTimeline) return;
+      
+      const rect = timeline.getBoundingClientRect();
+      const percent = (e.clientX - rect.left) / rect.width;
+      currentFrame = percent * (NUM_FRAMES - 1);
+      currentFrame = Math.max(0, Math.min(NUM_FRAMES - 1, currentFrame));
+      drawFrame();
+    });
+
+    document.addEventListener('mouseup', () => {
+      isDraggingTimeline = false;
+    });
+
+    // Mouse events for canvas
+    canvas.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      lastX = e.clientX;
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      
+      const deltaX = e.clientX - lastX;
+      dragOffset += deltaX;
+      
+      // Convert drag distance to frame index
+      const pixelsPerFrame = canvas.width / 10;
+      const frameShift = Math.round(dragOffset / pixelsPerFrame);
+      currentFrame = ((frameShift % NUM_FRAMES) + NUM_FRAMES) % NUM_FRAMES;
+      
+      drawFrame();
+      lastX = e.clientX;
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+
+    canvas.addEventListener('dblclick', resetView);
+
+    // Touch events
+    canvas.addEventListener('touchstart', (e) => {
+      isDragging = true;
+      lastX = e.touches[0].clientX;
+    });
+
+    canvas.addEventListener('touchmove', (e) => {
+      if (!isDragging) return;
+      
+      const deltaX = e.touches[0].clientX - lastX;
+      dragOffset += deltaX;
+      
+      const pixelsPerFrame = canvas.width / 10;
+      const frameShift = Math.round(dragOffset / pixelsPerFrame);
+      currentFrame = ((frameShift % NUM_FRAMES) + NUM_FRAMES) % NUM_FRAMES;
+      
+      drawFrame();
+      lastX = e.touches[0].clientX;
+    });
+
+    canvas.addEventListener('touchend', () => {
+      isDragging = false;
+    });
+
+    // Load frame images
+    async function loadFrames() {
+      try {
+        for (let i = 0; i < NUM_FRAMES; i++) {
+          const frameNum = String(i).padStart(4, '0');
+          const img = new Image();
+          img.src = `frames/frame_${frameNum}.png`;
+          
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+          });
+          
+          frames.push(img);
+          
+          // Update loading text
+          const percent = Math.round(((i + 1) / NUM_FRAMES) * 100);
+          document.querySelector('.loader-text').textContent = `Loading... ${percent}%`;
+        }
+        
+        loader.classList.add('hidden');
+        resizeCanvas();
+        animate();
+        console.log('✓ All frames loaded');
+      } catch (error) {
+        console.error('Error loading frames:', error);
+        loader.innerHTML = '<div class="loader-card"><div style="color: rgba(255,0,0,0.9);">Error loading frames</div></div>';
+      }
+    }
+
+    // Handle window resize
+    window.addEventListener('resize', resizeCanvas);
+
+    // Start loading frames
+    loadFrames();
+  </script>
+</body>
+</html>
